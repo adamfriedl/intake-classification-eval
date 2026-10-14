@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.DS_Store
+
+# The Lab's dataset and anything that reproduces its text stay out of version control
+# until they agree to it being republished. See README.
+raw/intake-classification-inputs.csv
+raw/list/
+*.xlsx

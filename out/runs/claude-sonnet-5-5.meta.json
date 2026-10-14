@@ -1,0 +1,45 @@
+{
+ "model": "claude-sonnet-5-5",
+ "date": "2026-10-13",
+ "dataset_sha256": "0287c95edcf85070af44fa44471d1933e5407e010ff4eba21fb64b0da9884598",
+ "list_as_of": "Jun 16, 2026",
+ "list_sha256": "52122e8f355a5b7f4d984565675313d73345eccfad5560375ea3321a06195709",
+ "max_tokens": 4000,
+ "instructions": "You are the intake classifier for a legal help service. A person has written in. Read their message and record:\n\n1. The legal issue codes that fit, from the LIST taxonomy below. Pick the most specific code that the message supports. Give one code in most cases, up to three if the person clearly has separate issues. Give none if the message is not about a legal problem.\n2. The US state and county the person's problem is in, if the message lets you tell. Leave a field empty if you cannot tell.\n3. Whether this is an emergency: a deadline, hearing, lockout, shutoff, or safety risk within days.\n\nUse only codes that appear in the list. Each line is CODE<tab>NAME.\n\nLIST taxonomy:\n",
+ "message_format": "Channel: <Input-Channel>, blank line, Message: <User's Query>",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "list_issue_codes": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "state": {
+    "type": "string",
+    "description": "Two-letter postal abbreviation, or empty."
+   },
+   "county_name": {
+    "type": "string",
+    "description": "County name, e.g. 'Cook County', or empty."
+   },
+   "county_fips": {
+    "type": "string",
+    "description": "Five-digit county FIPS code, or empty."
+   },
+   "is_emergency": {
+    "type": "boolean"
+   }
+  },
+  "required": [
+   "list_issue_codes",
+   "state",
+   "county_name",
+   "county_fips",
+   "is_emergency"
+  ],
+  "additionalProperties": false
+ },
+ "note": "This file was written after the run finished, so it is a statement, not a record made at the time. The first 4 scenarios (CA-HO-0001 to CA-HO-0004) came from an earlier 5-scenario test with the same instructions, schema and message format but max_tokens of 500; the other 176 used 4000."
+}
