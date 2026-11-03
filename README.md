@@ -1,8 +1,7 @@
 # intake-classification-eval
 
-A review of the answer key in the "User Intake Classification" dataset (Draft v0.2, May 2026)
-from the Stanford Legal Design Lab's Legal Help Commons, and a first pass at scoring a model
-against it.
+Two runs of a model against the "User Intake Classification" dataset (Draft v0.2, May 2026)
+from the Stanford Legal Design Lab's Legal Help Commons.
 https://www.justicebench.org/dataset/intake-classification-inputs
 
 The dataset is a thoughtful piece of work. Alongside ordinary cases it includes deliberate
@@ -10,140 +9,133 @@ tests: messages with crisis words that are not emergencies, messages with no leg
 people caught between two jurisdictions, hostile or disorganised writers. That makes it a far
 better test of an intake tool than a plain list of cases, and it is why I wanted to work with it.
 
+It has 180 synthetic messages from people seeking legal help, each labelled with legal issue
+codes (LIST taxonomy), a state and county, and an emergency flag.
+
 ## What I found
 
-- **Proposed corrections to the answer key.** Checking the labels against the LIST code list and
-  the Census county file turned up 46 proposed corrections, nearly all county codes, and 21 rows
-  where the dataset's two copies of the issue codes differ. I've shared these with the Lab.
-- **Issue codes: most of the model's misses were a more specific code on the same path.** In 61
-  of its 102 misses the model named a code on the same path as the key's in the taxonomy, and in
-  58 of those its code was the more specific one. My prompt asked for the most specific code the
-  message supports, which the key does not always use.
-- **Emergencies: my prompt's definition was narrower than the key's.** I defined an emergency as
-  something "within days". Looking at the 41 cases where the model and the key disagree, I think
-  the key's broader standard is the right one for legal aid intake, so the emergency figures
-  mostly measure the gap between the two definitions.
-- **The model flagged every designed crisis scenario.** It caught all 10 emergency-variation scenarios (mental
-  health crisis, active immigration enforcement, threats of violence, a minor at risk), and was
-  not fooled by any of the 10 messages with crisis words in a non-urgent context, though the
-  narrow definition makes the second easier.
-- **Next:** a run with a prompt that follows the key's conventions, so that the figures measure
-  the model and not my choices.
+The main lesson is about the prompt, not the model. The first run's prompt was written before I
+had studied how the answer key is labelled; the second follows the key's conventions as far as I
+could read them. Changing only the instructions moved several figures by a wide margin.
 
-## How this came about
-
-The dataset has 180 synthetic messages from people seeking legal help, each labelled with
-legal issue codes (LIST taxonomy), a state and county, and an emergency flag. Before running
-any model against it, I checked the labels against two outside sources: the LIST code list and
-the Census Bureau's county code file. That turned up:
-
-- 46 proposed corrections, nearly all county codes that do not match the county the row names;
-- 21 rows where the dataset's two copies of the issue codes (a spreadsheet column and a JSON
-  cell) disagree;
-- 18 smaller inconsistencies that do not change a label.
-
-I sent these to the Lab as proposed corrections on 12 Oct 2026. The Lab has not yet said which
-it accepts.
+- **Issue codes: exact matches went from 9% to 23%.** The key usually gives one code at the
+  routing level of the taxonomy (e.g. "Eviction from a home"), not the most specific code. The
+  first prompt asked for the most specific code and allowed up to three; the model averaged 2.3
+  codes against the key's 1.36. The second prompt asks for the routing level, and the model
+  averaged 1.44.
+- **The lenient measures dipped slightly**, because the first run's extra codes gave it more
+  chances to hit one of the key's. They are reported anyway, and are why the exact-set measure
+  is the fairer one to compare.
+- **Most remaining code misses are still one level apart.** In 59 of the second run's 106
+  scenarios with no code right, the model's code was on the same path as the key's, and in 56 of
+  those it was the more specific one. For example, it often chose "Answering an eviction
+  lawsuit" where the key has "Being a defendant in an eviction lawsuit".
+- **Emergencies: the two prompts err in opposite directions.** The first defined an emergency as
+  something "within days" and missed 41 of the key's 92 emergencies. The second counts any
+  served papers, scheduled hearing or open deadline, and misses 4, but raises 27 false alarms.
+  Most of those are benefit denials with an appeal still open, lawsuits with no stated deadline,
+  or routine hearings, which the key treats as not urgent. The key's line sits between the two
+  prompts; where exactly is a legal judgment I'd want to discuss with the Lab, not tune for.
+- **The false-positive tests caught the second prompt's own rule.** It flagged 4 of the 10
+  messages with crisis words in a non-urgent context. Each of the 4 mentions a hearing or an
+  appeal (one 8 months away), so the model was following the prompt, not reacting to the words.
+- **Both runs caught all 10 designed crisis scenarios** (mental health crisis, active
+  immigration enforcement, threats of violence, a minor at risk).
+- **No legal issue:** the second run correctly gave no code to 7 of the 10 non-legal messages,
+  against 4 in the first.
 
 ## Which answer key the scoring uses
 
 The dataset file itself is never edited.
 
-- **Issue codes**: the JSON cell, which the dataset page calls the canonical gold label. Figures
-  are also given for the 159 rows where the spreadsheet column agrees with it.
-- **County**: the Census code for the county each row names. This is the one place the scoring
-  uses my corrections instead of the published codes.
-- **State and emergency**: the spreadsheet columns as published. The emergency column agrees
-  with the JSON on every row where the JSON can be read.
+- **Issue codes**: the JSON cell, which the dataset page calls the canonical gold label. One
+  row's JSON cell does not parse; for that row the LIST Code column is used.
+- **County**: matched by name against the Census Bureau's county file, so that a county is right
+  whether the model names it or gives its five-digit code.
+- **State and emergency**: the spreadsheet columns. The emergency column agrees with the JSON on
+  every row where the JSON can be read.
 
-The model's answers for all 180 scenarios are saved, so they can be rescored against any later
-version of the key without rerunning the model.
+The model's answers for all 180 scenarios are saved for both runs, so they can be rescored
+against any later version of the key without rerunning the model.
 
-## First pass
+## The two prompts
 
-One run of `claude-sonnet-5-5` on 13 Oct 2026. The prompt was written before seeing any answers,
-but also before the key's conventions had been studied, so several of its choices do not match
-the key (see "How to read these numbers"). I've kept the run as it is because it shows
-how much those choices matter. A run with a prompt that follows the key's
-conventions has not been done.
+Both runs use `claude-sonnet-5-5`, the same output schema, and the same message format (the
+intake channel, then the message). Only the instructions differ. Both are in
+`scripts/run_baseline.py` and recorded in each run's `.meta.json`.
 
-| Field | Measure | All 180 | 159 undisputed rows |
+| | v1 (13 Oct 2026) | v2 (2 Nov 2026) |
+|---|---|---|
+| Written | Before seeing any answers, and before studying the key | After studying the key's labels and the v1 results |
+| Code level | The most specific code the message supports | The routing level, usually the second or third level of LIST; deeper only when the deeper code names the problem itself |
+| Number of codes | One in most cases, up to three | One for the main problem; another only for a separate current problem |
+| Jurisdiction | Where the problem is, if the message lets you tell | Where the person lives; infer the county from a city, neighbourhood or court |
+| Emergency | "a deadline, hearing, lockout, shutoff, or safety risk within days" | Served papers, a scheduled hearing, a notice, any open deadline to answer or appeal, an ongoing loss, or a current safety risk; not past matters, planning, or requests with no notice or deadline |
+| Today's date | Not given | Tuesday, 4 November 2025, the date the messages are written as of (several give dates relative to it, such as a hearing "8 days out") |
+
+## Results
+
+| Field | Measure | v1 | v2 |
 |---|---|---|---|
-| Issue code | Exact set of codes | 17 (9%) | 17 (11%) |
-| Issue code | At least one code right | 78 (43%) | 72 (45%) |
-| Issue code | Same code or on the same path | 139 (77%) | 119 (75%) |
-| Issue code | Right branch (e.g. `HO-02`) | 160 (89%) | 140 (88%) |
-| Issue code | Right area (e.g. Housing) | 169 (94%) | 148 (93%) |
+| Issue code | Exact set of codes | 17 (9%) | 42 (23%) |
+| Issue code | At least one code right | 78 (43%) | 74 (41%) |
+| Issue code | Same code or on the same path | 139 (77%) | 133 (74%) |
+| Issue code | Right branch (e.g. `HO-02`) | 160 (89%) | 160 (89%) |
+| Issue code | Right area (e.g. Housing) | 169 (94%) | 170 (94%) |
+| Issue code | Codes per scenario (key: 1.36) | 2.3 | 1.44 |
+| State | Right, of 176 | 168 (95%) | 172 (98%) |
+| County | Right by name, of 176 | 165 (94%) | 171 (97%) |
+| County | Right by FIPS code, of 176 | 165 (94%) | 170 (97%) |
+| Emergency | Right, of 180 | 138 (77%) | 149 (83%) |
+| Emergency | Key's 92 emergencies the model flagged (recall) | 51 (55%) | 88 (96%) |
+| Emergency | Model's flags the key agrees with (precision) | 51 of 52 (98%) | 88 of 115 (77%) |
 
-| Field | Right | Out of | |
-|---|---|---|---|
-| State | 168 | 176 | 95% |
-| County, by name | 165 | 176 | 94% |
-| County, by FIPS code | 165 | 176 | 94% |
-| Emergency | 138 | 180 | 77% |
-| Emergency: key's emergencies the model flagged (recall) | 51 | 92 | 55% |
-| Emergency: model's flags the key agrees with (precision) | 51 | 52 | 98% |
+Issue-code figures are out of 180. Four scenarios have no state or county in the key and are not
+scored on those fields.
 
-By the dataset's designed test categories:
+By the dataset's designed test categories, v1 / v2:
 
 | Category | Scenarios | At least one code right | Same code or on the same path | County right | Emergency right | Emergencies missed | False alarms |
 |---|---|---|---|---|---|---|---|
-| Ordinary | 136 | 65 | 110 | 123 | 103 | 32 | 1 |
-| Confounder | 14 | 5 | 12 | 13 | 5 | 9 | 0 |
-| Emergency variation | 10 | 3 | 7 | 10 | 10 | 0 | 0 |
-| False-positive emergency | 10 | 1 | 6 | 10 | 10 | 0 | 0 |
-| No legal issue | 10 | 4 | 4 | 9 | 10 | 0 | 0 |
+| Ordinary | 136 | 65 / 57 | 110 / 101 | 123 / 128 | 103 / 111 | 32 / 3 | 1 / 22 |
+| Confounder | 14 | 5 / 4 | 12 / 13 | 13 / 13 | 5 / 12 | 9 / 1 | 0 / 1 |
+| Emergency variation | 10 | 3 / 5 | 7 / 7 | 10 / 10 | 10 / 10 | 0 / 0 | 0 / 0 |
+| False-positive emergency | 10 | 1 / 1 | 6 / 5 | 10 / 10 | 10 / 6 | 0 / 0 | 0 / 4 |
+| No legal issue | 10 | 4 / 7 | 4 / 7 | 9 / 10 | 10 / 10 | 0 / 0 | 0 / 0 |
 
 "Confounder" covers the dataset's other deliberate tests: an off-topic preamble, several issues
 at once, conflicting facts, a hostile or distrustful writer, two jurisdictions.
 
-The model was not fooled by any of the 10 false-positive emergencies (crisis words in a
-non-urgent message), though a narrow emergency definition makes that easier. It gave a legal
-code to 6 of the 10 scenarios the key marks as not legal problems.
-
 ## How to read these numbers
 
-**Assumptions.** The dataset page names four things to extract: issue codes, jurisdiction,
-audience-served tags and an emergency flag. A prompt still has to settle details such as how
-specific a code should be and what counts as an emergency. The run made these choices:
-
-- The model sees the person's message and the intake channel. The dataset's JSON treats the
-  message alone as the input.
-- The prompt asks for the most specific code the message supports, and defines an emergency as
-  "a deadline, hearing, lockout, shutoff, or safety risk within days".
-- The prompt does not give today's date, so the model cannot tell how far away a dated hearing
-  or deadline is. A rerun should choose a date and state it.
-- Audience-served tags and special flags are not tested, and results are not broken down by the
-  dataset's difficulty rating.
-
-**Limits.**
-
-1. *The prompt is part of what is measured.* On issue codes, the key often uses a broad code
-   where the prompt asks for a specific one. On emergencies, the key marks about half of all
-   scenarios urgent, including a debt suit with a 28-day answer deadline and a scheduled custody
-   hearing, where the prompt asked for "within days". For legal aid intake the key's standard is
-   the better one: a served summons needs prompt action whatever the deadline, because the cost
-   of missing it is high and finding an advocate takes time. So the emergency figures mostly
-   measure the gap between two definitions, and they flatter the model's precision.
-2. *Nothing has been tuned, but some measures came later.* The prompt was not changed after
-   seeing results. Two parts of the scoring were added after seeing them: the "same path"
-   measure and the breakdown by category. Every measure is reported, not only the favourable
-   ones.
-3. *The figures are approximate.* One run, no repeat, 180 scenarios: differences of a few points
-   mean nothing.
-4. *There is no human comparison.* Nobody has measured how often two legal aid practitioners
-   would choose the same code for these messages, so there is no ceiling to compare against.
-5. *The messages are synthetic.* Many state the city, county and state outright; real intake is
+1. *The prompt is part of what is measured.* That is the point of running both. Neither run's
+   figures are a measure of the model alone.
+2. *v2 was written with knowledge of the key and of v1's errors.* There is no held-out set: the
+   conventions were read from the same 180 scenarios the model is scored on. So v2's figures are
+   optimistic, and the useful result is the gap between the runs rather than v2's own scores. The
+   prompt was written once and not changed after seeing v2's results. One draft included a time
+   limit on deadlines ("within about two months"); I dropped it before the full run because it
+   was fitted to a handful of labels rather than a principle. The partial run made with it was
+   discarded and is not reported.
+3. *Some measures came after seeing v1's results*: the "same path" measure and the breakdown by
+   category. Every measure is reported for both runs, not only the favourable ones.
+4. *The figures are approximate.* One run per prompt, no repeats, 180 scenarios: differences of
+   a few points mean nothing.
+5. *There is no human comparison.* Nobody has measured how often two legal aid practitioners
+   would choose the same code or the same emergency call for these messages, so there is no
+   ceiling to compare against.
+6. *The messages are synthetic.* Many state the city, county and state outright; real intake is
    messier.
-6. *The lenient measures reward listing more codes.* The model averaged 2.3 codes per scenario
-   against the key's 1.36, and only the exact-set measure penalises extras.
+7. *Not tested*: audience-served tags and special flags, and results by the dataset's difficulty
+   rating. The model also sees the intake channel, which the dataset's JSON does not treat as
+   part of the input.
 
-**Checks.** The scorer was tested with a perfect and an empty set of answers. Its figures on the
-159 undisputed rows were reproduced exactly by a second scorer written independently from
-plain-language rules. The 180-row figures use the same code with the JSON as the key; the
-independent scorer computed one of them (139 on the same path) and matched. The first four
-scenarios came from an earlier test invocation with a lower output limit and the same prompt;
-the run details are in `out/runs/claude-sonnet-5-5.meta.json`.
+**Checks.** The scorer was tested with a perfect and an empty set of answers. A second scorer
+(`scripts/check_score.py`), written separately from the scoring rules and sharing no code with
+the first, reproduces all 11 accuracy, recall and precision figures in the results table for
+both runs; the category breakdown and codes per scenario are not cross-checked. It checks the code, not the rules: a
+misreading of a rule shared by both would pass. In v1 the first four scenarios came from an earlier test invocation
+with a lower output limit and the same prompt; run details are in `out/runs/*.meta.json`.
 
 The scripts were written with Claude Code, and I reviewed them and the scoring choices. The
 reading of the results is mine.
@@ -153,11 +145,11 @@ reading of the results is mine.
 Kept out of version control until the Lab agrees to it being republished (the dataset is CC BY 4.0):
 
 - `raw/intake-classification-inputs.csv`: the dataset, exported from its Airtable view on 9 Oct 2026.
-  The sha256 of the copy each run used is in `out/runs/<model>.meta.json`.
+  The sha256 of the copy each run used is in `out/runs/<run>.meta.json`.
 - `raw/list/terms.json`: the LIST taxonomy feed (as of 16 Jun 2026), from
   https://taxonomy.legal/api/terms
-- `out/*.xlsx`, `out/runs/*-results.xlsx`: workbooks, which contain the dataset's messages.
-  Both are rebuilt by the scripts.
+- `out/runs/*-results.xlsx`: results workbooks, which contain the dataset's messages. They are
+  rebuilt by the scorer.
 
 `raw/census/national_county2020.txt` is the Census Bureau's 2020 county code file (public domain).
 
@@ -165,15 +157,16 @@ Kept out of version control until the Lab agrees to it being republished (the da
 
     python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-    # consistency checks on the answer key, and the review workbook
-    .venv/bin/python scripts/check_gold.py raw/intake-classification-inputs.csv raw/list/terms.json raw/census/national_county2020.txt
-    .venv/bin/python scripts/build_review.py raw/intake-classification-inputs.csv raw/list/terms.json raw/census/national_county2020.txt out/intake-classification-gold-label-review.xlsx
-
-    # model run (needs ANTHROPIC_API_KEY; costs money), then scoring
-    .venv/bin/python scripts/run_baseline.py --model claude-sonnet-5-5
+    # model runs (need ANTHROPIC_API_KEY; cost money), then scoring
+    .venv/bin/python scripts/run_baseline.py --model claude-sonnet-5-5               # v1
+    .venv/bin/python scripts/run_baseline.py --model claude-sonnet-5-5 --prompt v2   # v2
     .venv/bin/python scripts/score.py out/runs/claude-sonnet-5-5.jsonl
+    .venv/bin/python scripts/score.py out/runs/claude-sonnet-5-5-v2.jsonl
 
-`out/runs/<model>.jsonl` holds the model's answers by scenario ID. Scoring reads it, so the
+    # rescore a run a second way and compare with score.py (exits 1 on any mismatch)
+    .venv/bin/python scripts/check_score.py out/runs/claude-sonnet-5-5-v2.jsonl
+
+`out/runs/<run>.jsonl` holds the model's answers by scenario ID. Scoring reads it, so the
 answers can be rescored without calling the model again.
 
 ## Licence

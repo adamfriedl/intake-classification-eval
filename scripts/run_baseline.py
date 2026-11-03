@@ -1,7 +1,7 @@
 """Run a plain-prompt model baseline over the JusticeBench intake-classification scenarios.
 
-Usage: python3 scripts/run_baseline.py --model claude-sonnet-5-5 [--limit 5]
-Needs ANTHROPIC_API_KEY. Appends one JSON line per scenario to out/runs/<model>.jsonl and
+Usage: python3 scripts/run_baseline.py --model claude-sonnet-5-5 [--prompt v2] [--limit 5]
+Needs ANTHROPIC_API_KEY. Appends one JSON line per scenario to out/runs/<model>[-v2].jsonl and
 skips scenarios already there, so an interrupted run can be restarted. Score with score.py.
 
 The model sees only the user's query and the intake channel, plus the LIST code list.
@@ -36,6 +36,41 @@ Use only codes that appear in the list. Each line is CODE<tab>NAME.
 LIST taxonomy:
 """
 
+# v2 follows the answer key's conventions, worked out by profiling the key before writing it
+# (see the README). The date is the one the scenarios are written as of, not the run date.
+INSTRUCTIONS_V2 = """You are the intake classifier for a legal help service. A person has written in, \
+or a worker or referring agency has written on their behalf. Today is Tuesday, 4 November 2025. \
+Read the message and record:
+
+1. The legal issue codes, from the LIST taxonomy below. Code the legal problem the person needs \
+help with, at the level a legal aid office would use to route the case: usually the second or \
+third level of the taxonomy (for example HO-02-00-00-00 Eviction from a home, or \
+FA-04-00-00-00 Child Custody). Use a deeper code only when it names the person's problem \
+itself, not a step in the process. Give one code for the main problem. Add a second, or rarely \
+a third, only for a separate legal problem the person also needs help with now, not for \
+background or past matters. Give no codes if the message does not describe a legal problem \
+(for example a coworker conflict, a noisy neighbour, or a request for personal or financial advice).
+2. Where the person lives: the US state and county. If the message names a city, neighbourhood \
+or court rather than a county, give the county it is in. If the person lives in one place and \
+their case is in another, give where they live. Leave a field empty only if nothing in the \
+message points to a place.
+3. Whether this is an emergency for legal aid intake: without prompt help the person may lose a \
+right, their home, income, benefits, custody of a child, or their safety. Count as emergencies: \
+court papers served or a lawsuit filed against them, a scheduled court date or hearing, an \
+eviction or termination notice, any open deadline to answer, appeal or respond (finding an \
+advocate takes time), an ongoing loss such as a wage garnishment, a \
+suspended licence costing a job, or children kept out of school, and any current threat to \
+safety. Do not count: past or resolved matters, crisis words about history (an old conviction, \
+an expired order, past treatment), general questions, planning, or repair and accommodation \
+requests with no notice or deadline.
+
+Use only codes that appear in the list. Each line is CODE<tab>NAME.
+
+LIST taxonomy:
+"""
+
+PROMPTS = {"v1": INSTRUCTIONS, "v2": INSTRUCTIONS_V2}
+
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -50,18 +85,18 @@ SCHEMA = {
 }
 
 
-def system_prompt():
+def system_prompt(instructions):
     terms = json.load(open(TERMS, encoding="utf-8"))["terms"]
     lines = "\n".join(f'{t["code"]}\t{t["name"]}' for t in sorted(terms, key=lambda t: t["code"]))
     # The code list is the same for every scenario, so cache it.
-    return [{"type": "text", "text": INSTRUCTIONS + lines, "cache_control": {"type": "ephemeral"}}]
+    return [{"type": "text", "text": instructions + lines, "cache_control": {"type": "ephemeral"}}]
 
 
 MAX_TOKENS = 4000
 MESSAGE_FORMAT = "Channel: <Input-Channel>, blank line, Message: <User's Query>"
 
 
-def run_details(model):
+def run_details(model, instructions):
     """What a reader needs to know about a run: the prompt, the date, and which data it used."""
     return {
         "model": model,
@@ -70,7 +105,7 @@ def run_details(model):
         "list_as_of": json.load(open(TERMS, encoding="utf-8")).get("as_of"),
         "list_sha256": hashlib.sha256(TERMS.read_bytes()).hexdigest(),
         "max_tokens": MAX_TOKENS,
-        "instructions": INSTRUCTIONS,
+        "instructions": instructions,
         "message_format": MESSAGE_FORMAT,
         "schema": SCHEMA,
     }
@@ -79,13 +114,17 @@ def run_details(model):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
+    ap.add_argument("--prompt", choices=PROMPTS, default="v1",
+                    help="v1: the first run's prompt; v2: follows the key's conventions")
     ap.add_argument("--limit", type=int, help="only run the first N scenarios not yet done")
     args = ap.parse_args()
 
-    out = ROOT / "out/runs" / f"{args.model}.jsonl"
+    instructions = PROMPTS[args.prompt]
+    suffix = "" if args.prompt == "v1" else "-" + args.prompt
+    out = ROOT / "out/runs" / f"{args.model}{suffix}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     done = {json.loads(line)["sid"] for line in open(out)} if out.exists() else set()
-    meta_path, details = out.with_suffix(".meta.json"), run_details(args.model)
+    meta_path, details = out.with_suffix(".meta.json"), run_details(args.model, instructions)
     if meta_path.exists():
         old = json.load(open(meta_path))
         # One results file must come from one prompt and one dataset, or the scores mean nothing.
@@ -100,7 +139,7 @@ def main():
         rows = rows[:args.limit]
 
     client = anthropic.Anthropic()
-    system = system_prompt()
+    system = system_prompt(instructions)
     with open(out, "a") as f:
         for i, r in enumerate(rows, 1):
             msg = client.messages.create(

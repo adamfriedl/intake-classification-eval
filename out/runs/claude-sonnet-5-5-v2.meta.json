@@ -1,0 +1,44 @@
+{
+ "model": "claude-sonnet-5-5",
+ "date": "2026-11-02",
+ "dataset_sha256": "0287c95edcf85070af44fa44471d1933e5407e010ff4eba21fb64b0da9884598",
+ "list_as_of": "Jun 16, 2026",
+ "list_sha256": "52122e8f355a5b7f4d984565675313d73345eccfad5560375ea3321a06195709",
+ "max_tokens": 4000,
+ "instructions": "You are the intake classifier for a legal help service. A person has written in, or a worker or referring agency has written on their behalf. Today is Tuesday, 4 November 2025. Read the message and record:\n\n1. The legal issue codes, from the LIST taxonomy below. Code the legal problem the person needs help with, at the level a legal aid office would use to route the case: usually the second or third level of the taxonomy (for example HO-02-00-00-00 Eviction from a home, or FA-04-00-00-00 Child Custody). Use a deeper code only when it names the person's problem itself, not a step in the process. Give one code for the main problem. Add a second, or rarely a third, only for a separate legal problem the person also needs help with now, not for background or past matters. Give no codes if the message does not describe a legal problem (for example a coworker conflict, a noisy neighbour, or a request for personal or financial advice).\n2. Where the person lives: the US state and county. If the message names a city, neighbourhood or court rather than a county, give the county it is in. If the person lives in one place and their case is in another, give where they live. Leave a field empty only if nothing in the message points to a place.\n3. Whether this is an emergency for legal aid intake: without prompt help the person may lose a right, their home, income, benefits, custody of a child, or their safety. Count as emergencies: court papers served or a lawsuit filed against them, a scheduled court date or hearing, an eviction or termination notice, any open deadline to answer, appeal or respond (finding an advocate takes time), an ongoing loss such as a wage garnishment, a suspended licence costing a job, or children kept out of school, and any current threat to safety. Do not count: past or resolved matters, crisis words about history (an old conviction, an expired order, past treatment), general questions, planning, or repair and accommodation requests with no notice or deadline.\n\nUse only codes that appear in the list. Each line is CODE<tab>NAME.\n\nLIST taxonomy:\n",
+ "message_format": "Channel: <Input-Channel>, blank line, Message: <User's Query>",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "list_issue_codes": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "state": {
+    "type": "string",
+    "description": "Two-letter postal abbreviation, or empty."
+   },
+   "county_name": {
+    "type": "string",
+    "description": "County name, e.g. 'Cook County', or empty."
+   },
+   "county_fips": {
+    "type": "string",
+    "description": "Five-digit county FIPS code, or empty."
+   },
+   "is_emergency": {
+    "type": "boolean"
+   }
+  },
+  "required": [
+   "list_issue_codes",
+   "state",
+   "county_name",
+   "county_fips",
+   "is_emergency"
+  ],
+  "additionalProperties": false
+ }
+}

@@ -6,26 +6,82 @@ Summary, All scenarios, and Not exactly right.
 
 Answer key:
 - Issue codes come from the "JSON case profiler" cell, which the dataset page calls the canonical
-  gold label. Figures are also given for the rows where the "LIST Code" column agrees with it,
-  since the review asked the Lab to confirm the others (the disputed rows).
-- County is the Census code for the row's named jurisdiction, i.e. the corrected value from
-  the review, not the dataset's own FIPS columns.
-- Emergency comes from the "Emergency?" column.
+  gold label. One row's JSON does not parse; for it the "LIST Code" column is used.
+- County is matched by name against the Census county file, for the county the row names in
+  its "Jurisdiction" column.
+- State and emergency come from the "Jdx it belongs to" and "Emergency?" columns.
 """
+import csv
 import json
 import pathlib
+import re
 import sys
 
 from openpyxl import Workbook
-
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from build_review import table, text
-from check_gold import CODE, STATES, collect, load_census, norm
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CSV = ROOT / "raw/intake-classification-inputs.csv"
 TERMS = ROOT / "raw/list/terms.json"
 CENSUS = ROOT / "raw/census/national_county2020.txt"
+
+CODE = re.compile(r"[A-Z]{2}-\d{2}-\d{2}-\d{2}-\d{2}")
+STATES = {
+    "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
+    "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "District of Columbia": "DC",
+    "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL",
+    "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA",
+    "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN",
+    "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
+    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+    "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR",
+    "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD",
+    "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA",
+    "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
+}
+
+
+def norm(name):
+    return re.sub(r"[^a-z]", "", name.lower().replace("saint", "st"))
+
+
+def load_census(path):
+    """(state, normalised county name) -> five-digit FIPS code."""
+    with open(path, encoding="utf-8") as f:
+        return {(r["STATE"], norm(r["COUNTYNAME"])): r["STATEFP"] + r["COUNTYFP"]
+                for r in csv.DictReader(f, delimiter="|")}
+
+
+FONT = "Arial"
+HEAD_FILL = PatternFill("solid", start_color="1F3864")
+THIN = Side(style="thin", color="BFBFBF")
+BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+WRAP = Alignment(wrap_text=True, vertical="top")
+
+
+def table(ws, top, headers, rows, widths):
+    for c, (h, w) in enumerate(zip(headers, widths), 1):
+        cell = ws.cell(row=top, column=c, value=h)
+        cell.font = Font(name=FONT, bold=True, color="FFFFFF")
+        cell.fill, cell.alignment, cell.border = HEAD_FILL, WRAP, BORDER
+        ws.column_dimensions[get_column_letter(c)].width = w
+    for r, row in enumerate(rows, top + 1):
+        for c, v in enumerate(row, 1):
+            cell = ws.cell(row=r, column=c, value=v)
+            cell.font, cell.alignment, cell.border = Font(name=FONT), WRAP, BORDER
+            cell.number_format = "@"
+    ws.freeze_panes = ws.cell(row=top + 1, column=2)
+    ws.auto_filter.ref = f"A{top}:{get_column_letter(len(headers))}{top + len(rows)}"
+
+
+def text(ws, row, value, bold=False, size=10, width_cols=1):
+    cell = ws.cell(row=row, column=1, value=value)
+    cell.font = Font(name=FONT, bold=bold, size=size)
+    cell.alignment = Alignment(wrap_text=width_cols > 1, vertical="top")
+    if width_cols > 1:
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=width_cols)
+    return cell
 
 # Issue-code outcomes, best first. Each measure counts an outcome and every one above it.
 EXACT, PARTIAL, LINE, BRANCH, AREA, WRONG = (
@@ -90,7 +146,7 @@ def category(output):
     return "Confounder" if kind else "Ordinary"
 
 
-def judge(rows, preds, terms, disputed, by_name):
+def judge(rows, preds, terms, by_name):
     """One dict per answered scenario: the key, the model's answer, and the outcome per field."""
     def named(codes):
         return "\n".join(f"{c}  {terms[c]['name'] if c in terms else '(not in LIST)'}" for c in sorted(codes))
@@ -117,7 +173,6 @@ def judge(rows, preds, terms, disputed, by_name):
         out.append({
             "sid": sid, "channel": r["Input-Channel"], "query": r["User's Query"],
             "category": category(output), "kind": (output or {}).get("confounder_type") or "",
-            "disputed": "yes" if sid in disputed else "",
             "key_codes": named(gold), "model_codes": named(got),
             "code": code_outcome(gold, got),
             "invented": sum(1 for c in got if c not in terms),
@@ -141,10 +196,8 @@ def summarise(res):
         return (field, measure, right, total, f"{100 * right / total:.0f}%" if total else "", meaning)
 
     out = []
-    for field, coded in (("Issue code", res),
-                         ("Issue code, undisputed rows only", [x for x in res if not x["disputed"]])):
-        out += [line(field, name, sum(1 for x in coded if ORDER.index(x["code"]) <= ORDER.index(worst)),
-                     len(coded), meaning) for name, worst, meaning in CODE_MEASURES]
+    out += [line("Issue code", name, sum(1 for x in res if ORDER.index(x["code"]) <= ORDER.index(worst)),
+                 len(res), meaning) for name, worst, meaning in CODE_MEASURES]
     for field, key, meaning in (
             ("State", "state", "The model's state is the key's state."),
             ("County, by name", "county", "The county the model named is the key's county."),
@@ -190,7 +243,6 @@ def workbook(path, run_path, res, summary, meta):
         ("Run date", meta.get("date", "not recorded")),
         ("Dataset file", f'{CSV.name} (sha256 {meta.get("dataset_sha256", "not recorded")[:12]})'),
         ("Scenarios answered", f"{len(res)} of {meta.get('scenarios', 'unknown')}"),
-        ("Rows where the LIST Code column disagrees with the JSON key", sum(1 for x in res if x["disputed"])),
         ("Codes the model gave that are not in LIST", sum(x["invented"] for x in res)),
         ("Emergencies missed / false alarms", f'{sum(1 for x in res if x["emerg"] == "missed emergency")} / '
                                                f'{sum(1 for x in res if x["emerg"] == "false alarm")}'),
@@ -212,7 +264,7 @@ def workbook(path, run_path, res, summary, meta):
     text(ws, row + 3, "Message format: " + meta.get("message_format", "not recorded"))
 
     cols = [("Scenario", "sid", 16), ("Category", "category", 16), ("Confounder type", "kind", 22),
-            ("Key disputed", "disputed", 9), ("Channel", "channel", 11), ("Message", "query", 70),
+            ("Channel", "channel", 11), ("Message", "query", 70),
             ("Key: issue codes", "key_codes", 44), ("Model: issue codes", "model_codes", 44),
             ("Issue code result", "code", 24),
             ("Key: state", "key_state", 8), ("Model: state", "model_state", 8), ("State", "state", 10),
@@ -247,10 +299,10 @@ def main(run_path):
             preds[rec["sid"]] = rec["pred"]
     meta_path = run_path.with_suffix(".meta.json")
     meta = json.load(open(meta_path)) if meta_path.exists() else {}
-    rows, terms, _, disputes, _ = collect(CSV, TERMS, CENSUS)
+    rows = list(csv.DictReader(open(CSV, encoding="utf-8-sig", newline="")))
+    terms = {t["code"]: t for t in json.load(open(TERMS, encoding="utf-8"))["terms"]}
     meta["scenarios"] = len(rows)
-    by_name, _ = load_census(CENSUS)
-    res = judge(rows, preds, terms, {d["sid"] for d in disputes}, by_name)
+    res = judge(rows, preds, terms, load_census(CENSUS))
     summary = summarise(res)
 
     print(f"{run_path.stem}: {len(res)} scenarios scored\n")
