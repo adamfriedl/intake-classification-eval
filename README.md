@@ -4,45 +4,50 @@ Two runs of a model against the "User Intake Classification" dataset (Draft v0.2
 from the Stanford Legal Design Lab's Legal Help Commons.
 https://www.justicebench.org/dataset/intake-classification-inputs
 
-The dataset is a thoughtful piece of work. Alongside ordinary cases it includes deliberate
-tests: messages with crisis words that are not emergencies, messages with no legal issue at all,
-people caught between two jurisdictions, hostile or disorganised writers. That makes it a far
-better test of an intake tool than a plain list of cases, and it is why I wanted to work with it.
+The dataset has 180 synthetic messages from people seeking legal help, each labelled with legal
+issue codes (LIST taxonomy), a state and county, and an emergency flag. It also includes
+deliberate tests: messages with crisis words that are not emergencies, messages with no legal
+issue, people caught between two jurisdictions, hostile or disorganised writers. That makes it a
+far better test of an intake tool than a plain list of cases.
 
-It has 180 synthetic messages from people seeking legal help, each labelled with legal issue
-codes (LIST taxonomy), a state and county, and an emergency flag.
+## Summary
+
+I ran Claude Sonnet 5.5 on all 180 scenarios with two prompts and scored both against the key.
+The first prompt was written before I had studied how the key is labelled; the second follows
+the key's conventions. Exact-match issue codes rose from 9% to 23%, and emergency recall rose
+from 55% to 96% at the cost of 27 false alarms. Both runs caught all 10 designed crisis
+scenarios.
+
+The conventions are implicit: routing-level codes, usually one per message, and an emergency
+line that sits between "within days" and "any open deadline". A model scored without them looks
+much worse than it is, and the second prompt's figures are optimistic because it was written
+after reading the key (see [How to read these numbers](#how-to-read-these-numbers)). The scores
+are against a Draft v0.2 key and may shift as it settles. Every answer is saved, so either run
+can be rescored without calling the model again.
 
 ## What I found
-
-The main lesson is about the prompt, not the model. The first run's prompt was written before I
-had studied how the answer key is labelled; the second follows the key's conventions as far as I
-could read them. Changing only the instructions moved several figures by a wide margin.
 
 - **Issue codes: exact matches went from 9% to 23%.** The key usually gives one code at the
   routing level of the taxonomy (e.g. "Eviction from a home"), not the most specific code. The
   first prompt asked for the most specific code and allowed up to three; the model averaged 2.3
   codes against the key's 1.36. The second prompt asks for the routing level, and the model
-  averaged 1.44.
-- **The lenient measures dipped slightly**, because the first run's extra codes gave it more
-  chances to hit one of the key's. They are reported anyway, and are why the exact-set measure
-  is the fairer one to compare.
-- **Most remaining code misses are still one level apart.** In 59 of the second run's 106
-  scenarios with no code right, the model's code was on the same path as the key's, and in 56 of
-  those it was the more specific one. For example, it often chose "Answering an eviction
-  lawsuit" where the key has "Being a defendant in an eviction lawsuit".
+  averaged 1.44. The lenient measures dipped slightly, because the first run's extra codes gave
+  it more chances to hit one of the key's, so the exact-set measure is the fairer comparison.
+  Most remaining misses are one level apart: in 59 of the second run's 106 scenarios with no
+  code right, the model's code was on the same path as the key's, and in 56 of those it was the
+  more specific one.
 - **Emergencies: the two prompts err in opposite directions.** The first defined an emergency as
   something "within days" and missed 41 of the key's 92 emergencies. The second counts any
   served papers, scheduled hearing or open deadline, and misses 4, but raises 27 false alarms.
   Most of those are benefit denials with an appeal still open, lawsuits with no stated deadline,
   or routine hearings, which the key treats as not urgent. The key's line sits between the two
   prompts; where exactly is a legal judgment I'd want to discuss with the Lab, not tune for.
-- **The false-positive tests caught the second prompt's own rule.** It flagged 4 of the 10
-  messages with crisis words in a non-urgent context. Each of the 4 mentions a hearing or an
-  appeal (one 8 months away), so the model was following the prompt, not reacting to the words.
-- **Both runs caught all 10 designed crisis scenarios** (mental health crisis, active
-  immigration enforcement, threats of violence, a minor at risk).
-- **No legal issue:** the second run correctly gave no code to 7 of the 10 non-legal messages,
-  against 4 in the first.
+- **The designed tests.** Both runs caught all 10 crisis scenarios (mental health crisis, active
+  immigration enforcement, threats of violence, a minor at risk). The second prompt tripped on
+  its own rule in 4 of the 10 crisis-word messages that are not emergencies: each mentions a
+  hearing or an appeal (one 8 months away), so the model was following the prompt, not reacting
+  to the words. On the 10 messages with no legal issue, the second run correctly gave no code to
+  7, against 4 in the first.
 
 ## Which answer key the scoring uses
 
@@ -130,22 +135,27 @@ at once, conflicting facts, a hostile or distrustful writer, two jurisdictions.
    rating. The model also sees the intake channel, which the dataset's JSON does not treat as
    part of the input.
 
-**Checks.** The scorer was tested with a perfect and an empty set of answers. A second scorer
-(`scripts/check_score.py`), written separately from the scoring rules and sharing no code with
-the first, reproduces all 11 accuracy, recall and precision figures in the results table for
-both runs; the category breakdown and codes per scenario are not cross-checked. It checks the code, not the rules: a
-misreading of a rule shared by both would pass. In v1 the first four scenarios came from an earlier test invocation
-with a lower output limit and the same prompt; run details are in `out/runs/*.meta.json`.
+**Checks.**
+
+- The scorer was tested with a perfect and an empty set of answers.
+- A second scorer (`scripts/check_score.py`), written separately from the scoring rules and
+  sharing no code with the first, reproduces all 11 accuracy, recall and precision figures in
+  the results table for both runs. The category breakdown and codes per scenario are not
+  cross-checked.
+- It checks the code, not the rules: a misreading of a rule shared by both would pass.
+- In v1 the first four scenarios came from an earlier test invocation with a lower output limit
+  and the same prompt. Run details are in `out/runs/*.meta.json`.
 
 The scripts were written with Claude Code, and I reviewed them and the scoring choices. The
 reading of the results is mine.
 
 ## Data that is not in this repo
 
-Kept out of version control until the Lab agrees to it being republished (the dataset is CC BY 4.0):
+The dataset is CC BY 4.0, so it could be republished with attribution. I have left it out as a
+courtesy to the Lab, which may revise it. To reproduce the runs, get the data and put it here:
 
-- `raw/intake-classification-inputs.csv`: the dataset, exported from its Airtable view on 9 Oct 2026.
-  The sha256 of the copy each run used is in `out/runs/<run>.meta.json`.
+- `raw/intake-classification-inputs.csv`: the dataset, exported from its Airtable view on 9 Oct
+  2026 (link at the top). The sha256 of the copy each run used is in `out/runs/<run>.meta.json`.
 - `raw/list/terms.json`: the LIST taxonomy feed (as of 16 Jun 2026), from
   https://taxonomy.legal/api/terms
 - `out/runs/*-results.xlsx`: results workbooks, which contain the dataset's messages. They are
